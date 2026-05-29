@@ -30,7 +30,11 @@ Response:
 
 ### 2. データ同期（取得）
 
-`GET /api.php?action=sync&api_key=<API_KEY>`
+`GET /api.php?action=sync`
+
+Header:
+
+- `X-API-Key` ヘッダーに API キーを指定（`Authorization` も利用可能）
 
 Response:
 
@@ -45,4 +49,3 @@ Body (form or JSON):
 
 - `api_key`
 - `data` (JSON object/array)
-

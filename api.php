@@ -111,6 +111,46 @@ function parseRequestBody(): array
     return $_POST;
 }
 
+function getAuthorizationHeader(): string
+{
+    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        return (string) $_SERVER['HTTP_AUTHORIZATION'];
+    }
+
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        if (is_array($headers)) {
+            foreach ($headers as $name => $value) {
+                if (mb_strtolower((string) $name) === 'authorization') {
+                    return (string) $value;
+                }
+            }
+        }
+    }
+
+    return '';
+}
+
+function apiKeyFromRequest(array $body): string
+{
+    $apiKey = trim((string) ($body['api_key'] ?? ''));
+    if ($apiKey !== '') {
+        return $apiKey;
+    }
+
+    $apiKeyHeader = trim((string) ($_SERVER['HTTP_X_API_KEY'] ?? ''));
+    if ($apiKeyHeader !== '') {
+        return $apiKeyHeader;
+    }
+
+    $authorization = getAuthorizationHeader();
+    if (preg_match('/^Bearer\\s+(.+)$/i', $authorization, $matches) === 1) {
+        return trim($matches[1]);
+    }
+
+    return '';
+}
+
 function issueApiKey(): string
 {
     return bin2hex(random_bytes(24));
@@ -228,7 +268,7 @@ try {
     }
 
     if ($action === 'sync') {
-        $apiKey = (string) ($body['api_key'] ?? $_GET['api_key'] ?? '');
+        $apiKey = apiKeyFromRequest($body);
         if ($apiKey === '') {
             respond(['error' => 'api_key is required'], 400);
         }

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+session_start();
+
 const USERS_DB_PATH = __DIR__ . '/data/users.db';
 
 function ensureWebStorage(): void
@@ -86,13 +88,25 @@ function getOrCreateWebUser(string $email): array
 
 $user = null;
 $error = null;
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-    $email = (string) ($_POST['email'] ?? '');
+$csrfToken = (string) ($_SESSION['csrf_token'] ?? '');
+if ($csrfToken === '') {
+    $csrfToken = bin2hex(random_bytes(24));
+    $_SESSION['csrf_token'] = $csrfToken;
+}
 
-    try {
-        $user = getOrCreateWebUser($email);
-    } catch (Throwable $e) {
-        $error = $e->getMessage();
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    $postedToken = (string) ($_POST['csrf_token'] ?? '');
+    if (!hash_equals($csrfToken, $postedToken)) {
+        $error = '不正なリクエストです。';
+    }
+
+    $email = (string) ($_POST['email'] ?? '');
+    if ($error === null) {
+        try {
+            $user = getOrCreateWebUser($email);
+        } catch (Throwable $e) {
+            $error = $e->getMessage();
+        }
     }
 }
 ?>
@@ -108,6 +122,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
   <p>メールアドレス認証でAPIキーを発行し、<code>/api.php</code> でlater-cli同期に利用します。</p>
 
   <form method="post" action="/index.php">
+    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
     <label for="email">メールアドレス</label>
     <input id="email" name="email" type="email" required>
     <button type="submit">APIキーを発行/表示</button>
