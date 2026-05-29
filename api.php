@@ -22,7 +22,7 @@ function ensureStorage(): void
 
 function ensureDir(string $path, string $errorMessage): void
 {
-    if (!is_dir($path) && !mkdir($path, 0775, true) && !is_dir($path)) {
+    if (!is_dir($path) && !mkdir($path, 0755, true) && !is_dir($path)) {
         respond(['error' => $errorMessage], 500);
     }
 }

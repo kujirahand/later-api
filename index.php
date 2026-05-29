@@ -12,11 +12,11 @@ function ensureWebStorage(): void
     $usersDir = $dataDir . '/users';
 
     if (!is_dir($dataDir)) {
-        mkdir($dataDir, 0775, true);
+        mkdir($dataDir, 0755, true);
     }
 
     if (!is_dir($usersDir)) {
-        mkdir($usersDir, 0775, true);
+        mkdir($usersDir, 0755, true);
     }
 }
 
@@ -100,8 +100,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $error = '不正なリクエストです。';
     }
 
-    $email = (string) ($_POST['email'] ?? '');
     if ($error === null) {
+        $email = (string) ($_POST['email'] ?? '');
         try {
             $user = getOrCreateWebUser($email);
         } catch (Throwable $e) {
