@@ -1,324 +1,229 @@
 <?php
+/**
+ * Later API - API Entrypoint
+ */
 
 declare(strict_types=1);
 
-const DATA_DIR = __DIR__ . '/data';
-const USERS_DIR = DATA_DIR . '/users';
-const USERS_DB = DATA_DIR . '/users.db';
+// Set JSON header
+header('Content-Type: application/json; charset=utf-8');
 
-function respond(array $payload, int $status = 200): void
-{
-    http_response_code($status);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    exit;
+// Include DB configurations and helpers
+require_once __DIR__ . '/db.php';
+
+// Helper to send JSON responses
+function send_json_response($data, int $statusCode = 200): void {
+    http_response_code($statusCode);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit();
 }
 
-function ensureStorage(): void
-{
-    ensureDir(DATA_DIR, 'Failed to create data directory');
-    ensureDir(USERS_DIR, 'Failed to create users directory');
-}
-
-function ensureDir(string $path, string $errorMessage): void
-{
-    if (!is_dir($path) && !mkdir($path, 0755, true) && !is_dir($path)) {
-        respond(['error' => $errorMessage], 500);
-    }
-}
-
-function usersDb(): PDO
-{
-    static $pdo = null;
-    if ($pdo instanceof PDO) {
-        return $pdo;
-    }
-
-    ensureStorage();
-
-    $pdo = new PDO('sqlite:' . USERS_DB);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->exec(
-        'CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT NOT NULL UNIQUE,
-            api_key TEXT NOT NULL UNIQUE,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )'
-    );
-
-    return $pdo;
-}
-
-function bucketIndex(int $userId): int
-{
-    if ($userId < 1) {
-        respond(['error' => 'Invalid user id'], 400);
-    }
-
-    return intdiv($userId - 1, 10);
-}
-
-function userDataDb(int $userId): PDO
-{
-    static $connections = [];
-    $bucket = bucketIndex($userId);
-
-    if (isset($connections[$bucket]) && $connections[$bucket] instanceof PDO) {
-        return $connections[$bucket];
-    }
-
-    $path = USERS_DIR . '/user-' . $bucket . '.db';
-
-    $pdo = new PDO('sqlite:' . $path);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->exec(
-        'CREATE TABLE IF NOT EXISTS sync_data (
-            user_id INTEGER PRIMARY KEY,
-            data TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )'
-    );
-
-    $connections[$bucket] = $pdo;
-
-    return $connections[$bucket];
-}
-
-function normalizeEmail(string $email): string
-{
-    return mb_strtolower(trim($email));
-}
-
-function parseRequestBody(): array
-{
-    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
-    if (str_contains($contentType, 'application/json')) {
-        $raw = file_get_contents('php://input');
-        if ($raw === false || $raw === '') {
-            return [];
-        }
-
-        $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            respond(['error' => 'Invalid JSON body'], 400);
-        }
-
-        return $decoded;
-    }
-
-    return $_POST;
-}
-
-function getAuthorizationHeader(): string
-{
-    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
-        return (string) $_SERVER['HTTP_AUTHORIZATION'];
-    }
-
-    if (function_exists('getallheaders')) {
-        $headers = getallheaders();
-        if (is_array($headers)) {
-            foreach ($headers as $name => $value) {
-                if (mb_strtolower((string) $name) === 'authorization') {
-                    return (string) $value;
-                }
-            }
+// Helper to extract bearer token from headers
+function get_bearer_token(): ?string {
+    $headers = null;
+    if (isset($_SERVER['Authorization'])) {
+        $headers = trim($_SERVER['Authorization']);
+    } elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        $headers = trim($_SERVER['HTTP_AUTHORIZATION']);
+    } elseif (function_exists('apache_request_headers')) {
+        $requestHeaders = apache_request_headers();
+        $requestHeaders = array_combine(array_map('strtolower', array_keys($requestHeaders)), array_values($requestHeaders));
+        if (isset($requestHeaders['authorization'])) {
+            $headers = trim($requestHeaders['authorization']);
         }
     }
-
-    return '';
-}
-
-function apiKeyFromRequest(array $body): string
-{
-    $apiKey = trim((string) ($body['api_key'] ?? ''));
-    if ($apiKey !== '') {
-        return $apiKey;
-    }
-
-    $apiKeyHeader = trim((string) ($_SERVER['HTTP_X_API_KEY'] ?? ''));
-    if ($apiKeyHeader !== '') {
-        return $apiKeyHeader;
-    }
-
-    $authorization = getAuthorizationHeader();
-    if (preg_match('/^Bearer\\s+(\\S+)$/i', $authorization, $matches) === 1) {
+    
+    if (!empty($headers) && preg_match('/Bearer\s+(.*)$/i', $headers, $matches)) {
         return trim($matches[1]);
     }
-
-    return '';
-}
-
-function issueApiKey(): string
-{
-    return bin2hex(random_bytes(24));
-}
-
-function findOrCreateUser(string $email): array
-{
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        respond(['error' => 'Invalid email address'], 400);
-    }
-
-    $pdo = usersDb();
-    $now = gmdate(DATE_ATOM);
-    $email = normalizeEmail($email);
-
-    $select = $pdo->prepare('SELECT id, email, api_key FROM users WHERE email = :email');
-    $select->execute([':email' => $email]);
-    $existing = $select->fetch(PDO::FETCH_ASSOC);
-    if ($existing !== false) {
-        return $existing;
-    }
-
-    $apiKey = issueApiKey();
-    $insert = $pdo->prepare(
-        'INSERT INTO users (email, api_key, created_at, updated_at) VALUES (:email, :api_key, :created_at, :updated_at)'
-    );
-    $insert->execute([
-        ':email' => $email,
-        ':api_key' => $apiKey,
-        ':created_at' => $now,
-        ':updated_at' => $now,
-    ]);
-
-    return [
-        'id' => (int) $pdo->lastInsertId(),
-        'email' => $email,
-        'api_key' => $apiKey,
-    ];
-}
-
-function userByApiKey(string $apiKey): array
-{
-    $stmt = usersDb()->prepare('SELECT id, email, api_key FROM users WHERE api_key = :api_key');
-    $stmt->execute([':api_key' => trim($apiKey)]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if ($user === false) {
-        respond(['error' => 'Invalid API key'], 401);
-    }
-
-    return $user;
-}
-
-function upsertUserData(int $userId, array $data): string
-{
-    $pdo = userDataDb($userId);
-    $now = gmdate(DATE_ATOM);
-    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if ($json === false) {
-        respond(['error' => 'Failed to encode data'], 500);
-    }
-
-    $stmt = $pdo->prepare(
-        'INSERT INTO sync_data (user_id, data, updated_at)
-         VALUES (:user_id, :data, :updated_at)
-         ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at'
-    );
-    $stmt->execute([
-        ':user_id' => $userId,
-        ':data' => $json,
-        ':updated_at' => $now,
-    ]);
-
-    return $now;
-}
-
-function readUserData(int $userId): array
-{
-    $stmt = userDataDb($userId)->prepare('SELECT data, updated_at FROM sync_data WHERE user_id = :user_id');
-    $stmt->execute([':user_id' => $userId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if ($row === false) {
-        return ['data' => [], 'updated_at' => null];
-    }
-
-    $decoded = json_decode((string) $row['data'], true);
-    return [
-        'data' => is_array($decoded) ? $decoded : [],
-        'updated_at' => $row['updated_at'],
-    ];
+    return null;
 }
 
 try {
-    $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-    $action = $_GET['action'] ?? 'status';
-    $body = parseRequestBody();
-
-    if ($action === 'status') {
-        respond(['ok' => true, 'service' => 'later-api']);
+    // 1. Authenticate Request
+    $apiKey = get_bearer_token();
+    if (empty($apiKey)) {
+        send_json_response(['success' => false, 'message' => 'Authorization header (Bearer token) is missing or invalid'], 401);
     }
-
-    if ($action === 'register') {
-        if ($method !== 'POST') {
-            respond(['error' => 'Use POST for register'], 405);
-        }
-
-        $email = (string) ($body['email'] ?? '');
-        $user = findOrCreateUser($email);
-
-        respond([
-            'ok' => true,
-            'user_id' => (int) $user['id'],
-            'email' => $user['email'],
-            'api_key' => $user['api_key'],
-            'bucket' => bucketIndex((int) $user['id']),
-        ]);
+    
+    // Parse key format: laterapi::{user_id}::{hash_token}
+    $parsedKey = parse_api_key($apiKey);
+    if (!$parsedKey) {
+        send_json_response(['success' => false, 'message' => 'Invalid API key format'], 401);
     }
-
-    if ($action === 'sync') {
-        $apiKey = apiKeyFromRequest($body);
-        if ($apiKey === '') {
-            respond(['error' => 'api_key is required'], 400);
-        }
-
-        $user = userByApiKey($apiKey);
-        $userId = (int) $user['id'];
-
-        if ($method === 'GET') {
-            $stored = readUserData($userId);
-            respond([
-                'ok' => true,
-                'user_id' => $userId,
-                'email' => $user['email'],
-                'bucket' => bucketIndex($userId),
-                'data' => $stored['data'],
-                'updated_at' => $stored['updated_at'],
-            ]);
-        }
-
-        if ($method !== 'POST') {
-            respond(['error' => 'Use GET or POST for sync'], 405);
-        }
-
-        $payload = $body['data'] ?? null;
-        if (is_string($payload)) {
-            $decoded = json_decode($payload, true);
-            if (!is_array($decoded)) {
-                respond(['error' => 'data must be valid JSON object/array'], 400);
+    
+    $userId = $parsedKey['user_id'];
+    $db = get_db_connection();
+    
+    // Validate key against database and check expiry
+    $stmt = $db->prepare("SELECT * FROM api_keys WHERE api_key_hash = :api_key_hash AND user_id = :user_id");
+    $stmt->execute([
+        ':api_key_hash' => hash_api_key($apiKey),
+        ':user_id' => $userId
+    ]);
+    $keyInfo = $stmt->fetch();
+    
+    if (!$keyInfo) {
+        send_json_response(['success' => false, 'message' => 'API key is not registered'], 401);
+    }
+    
+    // Check expiration
+    if (strtotime($keyInfo['expires_at']) < time()) {
+        send_json_response(['success' => false, 'message' => 'API key has expired'], 401);
+    }
+    
+    // Fetch user details to ensure user is valid
+    $stmt = $db->prepare("SELECT * FROM users WHERE id = :id");
+    $stmt->execute([':id' => $userId]);
+    $user = $stmt->fetch();
+    if (!$user) {
+        send_json_response(['success' => false, 'message' => 'User not found'], 404);
+    }
+    
+    // 2. Routing sub-methods: method=post or method=get
+    $method = $_GET['method'] ?? '';
+    
+    // All API requests must be POST requests
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        send_json_response(['success' => false, 'message' => 'API requests must be sent via POST method'], 405);
+    }
+    
+    // Read input JSON
+    $rawInput = file_get_contents('php://input');
+    $input = json_decode($rawInput, true);
+    
+    if (json_last_error() !== JSON_ERROR_NONE && !empty($rawInput)) {
+        send_json_response(['success' => false, 'message' => 'Invalid JSON body'], 400);
+    }
+    
+    // Open the sharded user database
+    $userDb = get_user_db_connection($userId);
+    
+    switch ($method) {
+        case 'post':
+            // Record events
+            if (!isset($input['events']) || !is_array($input['events'])) {
+                send_json_response(['success' => false, 'message' => 'Missing or invalid "events" array in payload'], 400);
             }
-            $payload = $decoded;
-        }
-
-        if (!is_array($payload)) {
-            respond(['error' => 'data is required and must be object/array'], 400);
-        }
-
-        $updatedAt = upsertUserData($userId, $payload);
-        respond([
-            'ok' => true,
-            'user_id' => $userId,
-            'bucket' => bucketIndex($userId),
-            'updated_at' => $updatedAt,
-        ]);
+            
+            $events = $input['events'];
+            $insertedCount = 0;
+            $skippedCount = 0;
+            
+            // Start transaction for efficiency
+            $userDb->beginTransaction();
+            
+            try {
+                // Prepared statements
+                $checkStmt = $userDb->prepare("SELECT COUNT(*) as count FROM events WHERE user_id = :user_id AND task_id = :task_id AND created_at = :created_at");
+                $insertStmt = $userDb->prepare("INSERT INTO events (user_id, task_id, json_str, created_at) VALUES (:user_id, :task_id, :json_str, :created_at)");
+                
+                foreach ($events as $event) {
+                    $guid = $event['guid'] ?? null;
+                    $timestamp = $event['timestamp'] ?? date('Y-m-d H:i:s');
+                    
+                    if (empty($guid)) {
+                        continue; // Skip invalid event with no guid
+                    }
+                    
+                    // Deduplicate based on user_id, task_id (guid) and created_at (timestamp)
+                    $checkStmt->execute([
+                        ':user_id' => $userId,
+                        ':task_id' => $guid,
+                        ':created_at' => $timestamp
+                    ]);
+                    $exists = intval($checkStmt->fetch()['count'] ?? 0) > 0;
+                    
+                    if ($exists) {
+                        $skippedCount++;
+                        continue;
+                    }
+                    
+                    // Serialized JSON event string
+                    $jsonStr = json_encode($event, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                    
+                    $insertStmt->execute([
+                        ':user_id' => $userId,
+                        ':task_id' => $guid,
+                        ':json_str' => $jsonStr,
+                        ':created_at' => $timestamp
+                    ]);
+                    $insertedCount++;
+                }
+                
+                // Commit sharded DB
+                $userDb->commit();
+                
+                // Update the last sync time in main DB
+                $mainDb = get_db_connection();
+                $updateStmt = $mainDb->prepare("UPDATE users SET sync_at = CURRENT_TIMESTAMP WHERE id = :id");
+                $updateStmt->execute([':id' => $userId]);
+                
+                send_json_response([
+                    'success' => true,
+                    'message' => 'Events processed successfully',
+                    'inserted' => $insertedCount,
+                    'skipped' => $skippedCount
+                ]);
+            } catch (Exception $e) {
+                $userDb->rollBack();
+                throw $e;
+            }
+            break;
+            
+        case 'get':
+            // Retrieve events
+            $dateTo = $input['date_to'] ?? null;
+            if (empty($dateTo)) {
+                $dateTo = date('Y-m-d H:i:s');
+            }
+            
+            $dateFrom = $input['date_from'] ?? null;
+            if (empty($dateFrom)) {
+                // Default is 7 days before date_to
+                $dateFrom = date('Y-m-d H:i:s', strtotime($dateTo . ' -7 days'));
+            }
+            
+            // Query sharded DB
+            $stmt = $userDb->prepare("SELECT json_str FROM events WHERE user_id = :user_id AND created_at BETWEEN :date_from AND :date_to ORDER BY created_at ASC");
+            $stmt->execute([
+                ':user_id' => $userId,
+                ':date_from' => $dateFrom,
+                ':date_to' => $dateTo
+            ]);
+            $rows = $stmt->fetchAll();
+            
+            $events = [];
+            foreach ($rows as $row) {
+                $event = json_decode($row['json_str'], true);
+                if ($event) {
+                    $events[] = $event;
+                }
+            }
+            
+            send_json_response($events);
+            break;
+            
+        case 'hello':
+            // Simple test endpoint to verify API key validity
+            $msg = $input['message'] ?? 'Hello, Later API!';
+            send_json_response([
+                'message' => $msg
+            ]);
+            break;
+            
+        default:
+            send_json_response(['success' => false, 'message' => 'Invalid or missing "method" parameter'], 400);
+            break;
     }
-
-    respond(['error' => 'Unknown action'], 404);
-} catch (Throwable $e) {
-    error_log((string) $e);
-    respond(['error' => 'Server error'], 500);
+    
+} catch (Exception $e) {
+    $config = get_config();
+    $isDebug = $config['debug'] ?? false;
+    
+    send_json_response([
+        'success' => false,
+        'message' => 'An internal server error occurred',
+        'error' => $isDebug ? $e->getMessage() : 'Internal Server Error'
+    ], 500);
 }

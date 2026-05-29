@@ -1,0 +1,22 @@
+-- SQLite用のユーザー情報テーブル
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nickname TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    passcode TEXT NOT NULL,
+    passcode_expires_at DATETIME DEFAULT NULL,
+    passcode_attempts INTEGER NOT NULL DEFAULT 0,
+    sync_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- APIキーの管理テーブル
+CREATE TABLE api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    api_key_hash TEXT NOT NULL UNIQUE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
