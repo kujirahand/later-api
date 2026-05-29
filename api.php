@@ -144,7 +144,7 @@ function apiKeyFromRequest(array $body): string
     }
 
     $authorization = getAuthorizationHeader();
-    if (preg_match('/^Bearer\\s+(.+)$/i', $authorization, $matches) === 1) {
+    if (preg_match('/^Bearer\\s+(\\S+)$/i', $authorization, $matches) === 1) {
         return trim($matches[1]);
     }
 

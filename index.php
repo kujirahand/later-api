@@ -124,7 +124,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
   <h1>later-api Webサービス</h1>
   <p>メールアドレス認証でAPIキーを発行し、<code>/api.php</code> でlater-cli同期に利用します。</p>
 
-  <form method="post" action="/index.php">
+  <form method="post" action="">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
     <label for="email">メールアドレス</label>
     <input id="email" name="email" type="email" required>
