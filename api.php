@@ -209,6 +209,9 @@ function upsertUserData(int $userId, array $data): string
     $pdo = userDataDb($userId);
     $now = gmdate(DATE_ATOM);
     $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        respond(['error' => 'Failed to encode data'], 500);
+    }
 
     $stmt = $pdo->prepare(
         'INSERT INTO sync_data (user_id, data, updated_at)
@@ -316,6 +319,6 @@ try {
 
     respond(['error' => 'Unknown action'], 404);
 } catch (Throwable $e) {
-    error_log($e->getMessage());
+    error_log((string) $e);
     respond(['error' => 'Server error'], 500);
 }

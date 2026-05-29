@@ -104,8 +104,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $email = (string) ($_POST['email'] ?? '');
         try {
             $user = getOrCreateWebUser($email);
+            $csrfToken = bin2hex(random_bytes(24));
+            $_SESSION['csrf_token'] = $csrfToken;
         } catch (Throwable $e) {
-            $error = $e->getMessage();
+            error_log((string) $e);
+            $error = '処理に失敗しました。しばらくしてから再度お試しください。';
         }
     }
 }
