@@ -263,22 +263,12 @@ function send_verification_email(string $email, string $token): bool {
     $config = get_config();
     $lang = get_current_lang();
     
-    // Construct dynamic verification URL for the user to click
-    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https" : "http";
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    $scriptName = $_SERVER['SCRIPT_NAME'] ?? '/index.php';
-    $baseUrl = "{$protocol}://{$host}{$scriptName}";
-    $verificationUrl = "{$baseUrl}?action=verify&email=" . urlencode($email) . "&token=" . urlencode($token);
-    
     // Japanese template
     $subjectJa = "Later APIの認証メール";
     $messageJa = "Later APIをご利用いただきありがとうございます。\n"
                . "以下のトークンをLater APIの認証ページに入力して、認証を完了してください。\n"
                . "---\n"
                . $token . "\n"
-               . "---\n"
-               . "または、以下のリンクをクリックして直接ログインすることもできます：\n"
-               . $verificationUrl . "\n"
                . "---\n"
                . "もし、このメールに心当たりがない場合は、削除してください。\n"
                . "申し訳ありませんが、このメールに返信しても対応できませんので、ご了承ください。";
@@ -289,9 +279,6 @@ function send_verification_email(string $email, string $token): bool {
                . "Please enter the following token on the Later API verification page to complete your login/registration:\n"
                . "---\n"
                . $token . "\n"
-               . "---\n"
-               . "Or, you can click the link below to log in directly:\n"
-               . $verificationUrl . "\n"
                . "---\n"
                . "If you did not request this email, please delete it.\n"
                . "Please note that you cannot reply to this automated email.";
