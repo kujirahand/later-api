@@ -16,12 +16,14 @@ function respond(array $payload, int $status = 200): void
 
 function ensureStorage(): void
 {
-    if (!is_dir(DATA_DIR) && !mkdir(DATA_DIR, 0775, true) && !is_dir(DATA_DIR)) {
-        respond(['error' => 'Failed to create data directory'], 500);
-    }
+    ensureDir(DATA_DIR, 'Failed to create data directory');
+    ensureDir(USERS_DIR, 'Failed to create users directory');
+}
 
-    if (!is_dir(USERS_DIR) && !mkdir(USERS_DIR, 0775, true) && !is_dir(USERS_DIR)) {
-        respond(['error' => 'Failed to create users directory'], 500);
+function ensureDir(string $path, string $errorMessage): void
+{
+    if (!is_dir($path) && !mkdir($path, 0775, true) && !is_dir($path)) {
+        respond(['error' => $errorMessage], 500);
     }
 }
 
@@ -51,12 +53,22 @@ function usersDb(): PDO
 
 function bucketIndex(int $userId): int
 {
-    return intdiv(max($userId - 1, 0), 10);
+    if ($userId < 1) {
+        respond(['error' => 'Invalid user id'], 500);
+    }
+
+    return intdiv($userId - 1, 10);
 }
 
 function userDataDb(int $userId): PDO
 {
+    static $connections = [];
     $bucket = bucketIndex($userId);
+
+    if (isset($connections[$bucket]) && $connections[$bucket] instanceof PDO) {
+        return $connections[$bucket];
+    }
+
     $path = USERS_DIR . '/user-' . $bucket . '.db';
 
     $pdo = new PDO('sqlite:' . $path);
@@ -69,7 +81,9 @@ function userDataDb(int $userId): PDO
         )'
     );
 
-    return $pdo;
+    $connections[$bucket] = $pdo;
+
+    return $connections[$bucket];
 }
 
 function normalizeEmail(string $email): string
@@ -262,5 +276,6 @@ try {
 
     respond(['error' => 'Unknown action'], 404);
 } catch (Throwable $e) {
-    respond(['error' => 'Server error', 'detail' => $e->getMessage()], 500);
+    error_log($e->getMessage());
+    respond(['error' => 'Server error'], 500);
 }
