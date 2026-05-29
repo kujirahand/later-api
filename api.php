@@ -54,7 +54,7 @@ function usersDb(): PDO
 function bucketIndex(int $userId): int
 {
     if ($userId < 1) {
-        respond(['error' => 'Invalid user id'], 500);
+        respond(['error' => 'Invalid user id'], 400);
     }
 
     return intdiv($userId - 1, 10);
