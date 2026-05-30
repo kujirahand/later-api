@@ -354,7 +354,28 @@ function send_smtp_mail(string $to, string $subject, string $message, array $mai
 
     try {
         $prefix = ($secure === 'ssl') ? 'ssl://' : '';
-        $socket = @fsockopen($prefix . $host, $port, $errno, $errstr, 15);
+        
+        // Handle certificate verification issues common in local development environments
+        $verifyPeer = $mailConfig['smtp_verify_peer'] ?? false; // Default to false for maximum out-of-the-box compatibility
+        
+        $contextOpts = [
+            'ssl' => [
+                'verify_peer' => $verifyPeer,
+                'verify_peer_name' => $verifyPeer,
+                'allow_self_signed' => !$verifyPeer
+            ]
+        ];
+        $context = stream_context_create($contextOpts);
+        
+        $socket = @stream_socket_client(
+            $prefix . $host . ':' . $port,
+            $errno,
+            $errstr,
+            15,
+            STREAM_CLIENT_CONNECT,
+            $context
+        );
+        
         if (!$socket) {
             throw new Exception("Could not connect to SMTP server: $errstr ($errno)");
         }

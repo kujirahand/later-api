@@ -1,11 +1,18 @@
-[2026-05-29 14:48:39] To: web@kujirahand.com | Subject: Later APIの認証メール
+[2026-05-30 00:28:06] To: web@kujirahand.com | Subject: Later API Verification Code / Later APIの認証メール
+Thank you for using Later API.
+Please enter the following token on the Later API verification page to complete your login/registration:
+---
+405116
+---
+If you did not request this email, please delete it.
+Please note that you cannot reply to this automated email.
+
+========================================
+
 Later APIをご利用いただきありがとうございます。
 以下のトークンをLater APIの認証ページに入力して、認証を完了してください。
 ---
-327255
----
-または、以下のリンクをクリックして直接ログインすることもできます：
-http://localhost:8888/index.php?action=verify&email=web%40kujirahand.com&token=327255
+405116
 ---
 もし、このメールに心当たりがない場合は、削除してください。
 申し訳ありませんが、このメールに返信しても対応できませんので、ご了承ください。
